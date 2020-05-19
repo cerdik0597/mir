@@ -87,6 +87,11 @@ mf::XWaylandServer::~XWaylandServer()
 void mf::XWaylandServer::stop()
 {
     {
+        std::lock_guard<std::mutex> lock(window_manager.mutex);
+        window_manager.wm.reset();
+    }
+
+    {
         std::lock_guard<std::mutex> lock(xserver.mutex);
 
         mir::log_info("Stopping XWayland server");
@@ -311,15 +316,24 @@ void mf::XWaylandServer::connect_wm_to_xwayland(
 
     try
     {
-        XWaylandWM wm{wayland_connector, client, wm_server_fd};
         mir::log_info("XServer is running");
         xserver.status = RUNNING;
         auto const pid = xserver.pid; // For clarity only as this is only written on this thread
+
+        {
+            std::lock_guard<std::mutex> lock{window_manager.mutex};
+            window_manager.wm = std::make_unique<XWaylandWM>(wayland_connector, client, wm_server_fd);
+        }
 
         server_lock.unlock();
         int status;
         waitpid(pid, &status, 0);  // Blocking
         server_lock.lock();
+
+        {
+            std::lock_guard<std::mutex> lock{window_manager.mutex};
+            window_manager.wm.reset();
+        }
 
         if (WIFEXITED(status) || xserver.stopped_by_us) {
             mir::log_info("Xserver stopped");

@@ -38,6 +38,7 @@ class MultiplexingDispatchable;
 namespace frontend
 {
 class WaylandConnector;
+class XWaylandWM;
 
 class XWaylandServer
 {
@@ -97,6 +98,12 @@ private:
         Status status{Status::STOPPED};
         bool stopped_by_us{false};
     } xserver;
+
+    struct
+    {
+        std::mutex mutex;
+        std::unique_ptr<XWaylandWM> wm; ///< can be null
+    } window_manager;
 };
 } /* frontend */
 } /* mir */
