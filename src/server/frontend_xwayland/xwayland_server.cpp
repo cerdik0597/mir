@@ -74,11 +74,18 @@ mf::XWaylandServer::XWaylandServer(
 
 mf::XWaylandServer::~XWaylandServer()
 {
-    mir::log_info("Deiniting xwayland server");
+    stop();
 
-    // Terminate any running xservers
+    if (spawn_thread.joinable())
+        spawn_thread.join();
+}
+
+void mf::XWaylandServer::stop()
+{
     {
         std::lock_guard<decltype(spawn_thread_mutex)> lock(spawn_thread_mutex);
+
+        mir::log_info("Stopping XWayland server");
 
         if (spawn_thread_xserver_status > 0)
         {
@@ -95,9 +102,6 @@ mf::XWaylandServer::~XWaylandServer()
             }
         }
     }
-
-    if (spawn_thread.joinable())
-        spawn_thread.join();
 }
 
 void mf::XWaylandServer::spawn()

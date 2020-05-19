@@ -48,6 +48,8 @@ public:
     auto x11_display() const -> std::string;
 
 private:
+    /// Kills the X server (called by the destructor)
+    void stop();
     /// Forks off the XWayland process
     void spawn();
     /// Called after fork() if we should turn into XWayland
