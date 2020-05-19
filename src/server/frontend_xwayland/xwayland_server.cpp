@@ -74,30 +74,34 @@ mf::XWaylandServer::XWaylandServer(
 
 mf::XWaylandServer::~XWaylandServer()
 {
+    std::lock_guard<std::mutex> lock(spawn_thread.mutex);
+
     stop();
 
-    if (spawn_thread.joinable())
-        spawn_thread.join();
+    if (spawn_thread.thread.joinable())
+    {
+        spawn_thread.thread.join();
+    }
 }
 
 void mf::XWaylandServer::stop()
 {
     {
-        std::lock_guard<decltype(spawn_thread_mutex)> lock(spawn_thread_mutex);
+        std::lock_guard<std::mutex> lock(xserver.mutex);
 
         mir::log_info("Stopping XWayland server");
 
-        if (spawn_thread_xserver_status > 0)
+        if (xserver.status > 0)
         {
-            spawn_thread_terminate = true;
+            xserver.stopped_by_us = true;
 
-            if (kill(spawn_thread_pid, SIGTERM) == 0)
+            if (kill(xserver.pid, SIGTERM) == 0)
             {
                 std::this_thread::sleep_for(100ms);// After 100ms...
-                if (kill(spawn_thread_pid, 0) == 0)    // ...if Xwayland is still running...
+                if (kill(xserver.pid, 0) == 0)    // ...if Xwayland is still running...
                 {
                     mir::log_info("Xwayland didn't close, killing it");
-                    kill(spawn_thread_pid, SIGKILL);     // ...then kill it!
+                    kill(xserver.pid, SIGKILL);     // ...then kill it!
                 }
             }
         }
@@ -112,7 +116,7 @@ void mf::XWaylandServer::spawn()
     int wl_client_fd[size], wm_fd[size];
 
     int xserver_spawn_tries = 0;
-    std::unique_lock<decltype(spawn_thread_mutex)> lock{spawn_thread_mutex};
+    std::unique_lock<std::mutex> lock{xserver.mutex};
 
     do
     {
@@ -121,7 +125,7 @@ void mf::XWaylandServer::spawn()
           mir::log_error("Xwayland failed to start 5 times in a row, disabling Xserver");
           return;
         }
-        spawn_thread_xserver_status = STARTING;
+        xserver.status = STARTING;
         xserver_spawn_tries++;
 
         if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, wl_client_fd) < 0)
@@ -139,9 +143,9 @@ void mf::XWaylandServer::spawn()
         }
 
         mir::log_info("Starting Xwayland");
-        spawn_thread_pid = fork();
+        xserver.pid = fork();
 
-        switch (spawn_thread_pid)
+        switch (xserver.pid)
         {
         case -1:
             mir::fatal_error("Failed to fork");
@@ -157,7 +161,7 @@ void mf::XWaylandServer::spawn()
             close(wl_client_fd[client]);
             close(wm_fd[client]);
             connect_wm_to_xwayland(Fd{wl_client_fd[server]}, Fd{wm_fd[server]}, lock);
-            if (spawn_thread_xserver_status != STARTING)
+            if (xserver.status != STARTING)
             {
                 // Reset the tries since the server started
                 xserver_spawn_tries = 0;
@@ -166,7 +170,7 @@ void mf::XWaylandServer::spawn()
             break;
         }
     }
-    while (spawn_thread_xserver_status != STOPPED);
+    while (xserver.status != STOPPED);
 }
 
 namespace
@@ -257,7 +261,7 @@ bool spin_wait_for(sig_atomic_t& xserver_ready)
 void mf::XWaylandServer::connect_wm_to_xwayland(
     Fd const& wl_client_server_fd,
     Fd const& wm_server_fd,
-    std::unique_lock<decltype(spawn_thread_mutex)>& spawn_thread_lock)
+    std::unique_lock<std::mutex>& server_lock)
 {
     // We need to set up the signal handling before connecting wl_client_server_fd
     static sig_atomic_t xserver_ready{ false };
@@ -309,22 +313,21 @@ void mf::XWaylandServer::connect_wm_to_xwayland(
     {
         XWaylandWM wm{wayland_connector, client, wm_server_fd};
         mir::log_info("XServer is running");
-        spawn_thread_xserver_status = RUNNING;
-        auto const pid = spawn_thread_pid; // For clarity only as this is only written on this thread
+        xserver.status = RUNNING;
+        auto const pid = xserver.pid; // For clarity only as this is only written on this thread
 
-        // Unlock access to spawn_thread_* while Xwayland is running
-        spawn_thread_lock.unlock();
+        server_lock.unlock();
         int status;
         waitpid(pid, &status, 0);  // Blocking
-        spawn_thread_lock.lock();
+        server_lock.lock();
 
-        if (WIFEXITED(status) || spawn_thread_terminate) {
+        if (WIFEXITED(status) || xserver.stopped_by_us) {
             mir::log_info("Xserver stopped");
-            spawn_thread_xserver_status = STOPPED;
+            xserver.status = STOPPED;
         } else {
             // Failed, crash or killed
             mir::log_info("Xserver crashed or got killed");
-            spawn_thread_xserver_status = FAILED;
+            xserver.status = FAILED;
         }
     }
     catch (std::exception const& e)
@@ -453,15 +456,24 @@ mf::XWaylandServer::SocketFd::~SocketFd()
 
 void mf::XWaylandServer::new_spawn_thread()
 {
-    std::lock_guard<decltype(spawn_thread_mutex)> lock(spawn_thread_mutex);
+    std::lock_guard<std::mutex> lock{spawn_thread.mutex};
 
-    // Don't run the server more then once!
-    if (spawn_thread_xserver_status > 0) return;
+    {
+        std::lock_guard<std::mutex> lock{xserver.mutex};
 
-    spawn_thread_xserver_status = STARTING;
+        // Don't run the server more then once!
+        if (xserver.status > 0)
+        {
+            return;
+        }
+        xserver.status = STARTING;
+    }
 
-    if (spawn_thread.joinable()) spawn_thread.join();
-    spawn_thread = std::thread{&mf::XWaylandServer::spawn, this};
+    if (spawn_thread.thread.joinable())
+    {
+        spawn_thread.thread.join();
+    }
+    spawn_thread.thread = std::thread{&mf::XWaylandServer::spawn, this};
 }
 
 auto mir::frontend::XWaylandServer::x11_display() const -> std::string

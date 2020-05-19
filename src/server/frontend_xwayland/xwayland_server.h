@@ -84,11 +84,19 @@ private:
     std::vector<std::shared_ptr<dispatch::ReadableFd>> dispatcher_fd;
     std::string const xwayland_path;
 
-    std::mutex mutable spawn_thread_mutex;
-    std::thread spawn_thread;
-    pid_t spawn_thread_pid;
-    Status spawn_thread_xserver_status{Status::STOPPED};
-    bool spawn_thread_terminate{false};
+    struct
+    {
+        std::mutex mutex;
+        std::thread thread;
+    } spawn_thread;
+
+    struct
+    {
+        std::mutex mutex;
+        pid_t pid;
+        Status status{Status::STOPPED};
+        bool stopped_by_us{false};
+    } xserver;
 };
 } /* frontend */
 } /* mir */
