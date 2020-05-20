@@ -795,12 +795,5 @@ void mf::XWaylandWM::handle_focus_in(xcb_focus_in_event_t* event)
 
 void mf::XWaylandWM::handle_error(xcb_generic_error_t* event)
 {
-    log_warning(
-        "XWayland error:\n"
-        "  error code: %d\n"
-        "  window: %s\n"
-        "  opcode: %d.%d",
-        event->error_code,
-        connection->window_debug_string(event->resource_id).c_str(),
-        event->major_code, event->minor_code);
+    log_warning("XWayland XCB error: %s", connection->error_debug_string(event).c_str());
 }
