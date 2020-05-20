@@ -136,10 +136,6 @@ mf::XWaylandWM::XWaylandWM(std::shared_ptr<WaylandConnector> wayland_connector, 
       wm_shell{std::static_pointer_cast<XWaylandWMShell>(wayland_connector->get_extension("x11-support"))},
       cursors{std::make_unique<XWaylandCursors>(connection)},
       wm_window{create_wm_window(*connection)},
-      wm_dispatcher{std::make_shared<mir::dispatch::ReadableFd>(
-          fd, [this]() { handle_events(); })},
-      event_thread{std::make_unique<mir::dispatch::ThreadedDispatcher>(
-          "Mir/X11 WM Reader", wm_dispatcher, []() { mir::terminate_with_current_exception(); })},
       scene_observer{std::make_shared<XWaylandSceneObserver>(this)}
 {
     check_xfixes(*connection);

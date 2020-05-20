@@ -320,6 +320,24 @@ void mf::XWaylandServer::connect_wm_to_xwayland(
         xserver.status = RUNNING;
         auto const pid = xserver.pid; // For clarity only as this is only written on this thread
 
+        auto const wm_dispatcher = std::make_shared<dispatch::ReadableFd>(wm_server_fd, [this]()
+            {
+                std::lock_guard<std::mutex> wm_lock{window_manager.mutex};
+                if (window_manager.wm)
+                {
+                    window_manager.wm->handle_events();
+                }
+            });
+        dispatch::ThreadedDispatcher const wm_event_thread{"Mir/X11 WM Reader", wm_dispatcher, [this]()
+            {
+                log(
+                    logging::Severity::warning,
+                    MIR_LOG_COMPONENT,
+                    std::current_exception(),
+                    "Failed to handle XCB events, stopping X11 server");
+                stop();
+            }};
+
         {
             std::lock_guard<std::mutex> lock{window_manager.mutex};
             window_manager.wm = std::make_unique<XWaylandWM>(wayland_connector, client, wm_server_fd);
